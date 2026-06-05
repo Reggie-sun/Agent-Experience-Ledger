@@ -3,18 +3,24 @@
 
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import re
 import sys
+import uuid
 from pathlib import Path
 
 from ledger_common import changed_files, continue_response, cwd_from_payload, diff_stat, run_git
 
 
+AUDIT_SCHEMA_VERSION = "1"
+
 CAPTURE_REASON = (
     "Before stopping, use the experience-capture skill to write one candidate memory to the ledger inbox. "
     "Capture only reusable engineering experience. Redact secrets. Do not store raw transcript. "
-    "After writing the candidate, stop."
+    "When writing the candidate memory, include this capture_request_id in the frontmatter or evidence section. "
+    "capture_request_id: "
+    "{capture_request_id}. After writing the candidate, stop."
 )
 
 KEYWORDS = {
@@ -64,6 +70,10 @@ def inside_git_repo(cwd: Path) -> bool:
     return run_git(cwd, ["rev-parse", "--is-inside-work-tree"]) == "true"
 
 
+def repo_root(cwd: Path) -> str:
+    return run_git(cwd, ["rev-parse", "--show-toplevel"])
+
+
 def keyword_hits(message: str) -> int:
     lowered = message.lower()
     hits = 0
@@ -76,28 +86,117 @@ def keyword_hits(message: str) -> int:
     return hits
 
 
-def score_payload(payload: dict) -> int:
+def decision_signals(payload: dict) -> dict:
     cwd = cwd_from_payload(payload)
+    files = changed_files(cwd)
+    stat = diff_stat(cwd)
+    hits = keyword_hits(str(payload.get("last_assistant_message") or ""))
+    inside = inside_git_repo(cwd)
     score = 0
-    if changed_files(cwd):
+    if files:
         score += 2
-    if diff_stat(cwd):
+    if stat:
         score += 2
-    score += min(keyword_hits(str(payload.get("last_assistant_message") or "")), 4)
+    score += min(hits, 4)
     if transcript_exists(payload):
         score += 1
-    if inside_git_repo(cwd):
+    if inside:
         score += 1
-    return score
+    root = repo_root(cwd) if inside else ""
+    return {
+        "cwd": cwd,
+        "repo_root": root,
+        "repo_name": Path(root).name if root else "",
+        "inside_git_repo": inside,
+        "changed_files_count": len(files),
+        "diff_stat_present": bool(stat),
+        "current_turn_keyword_hits": hits,
+        "score": score,
+    }
+
+
+def score_payload(payload: dict) -> int:
+    return int(decision_signals(payload)["score"])
+
+
+def audit_log_path() -> Path:
+    return Path.home() / ".agent-experience-ledger" / "stop-trigger-decisions.jsonl"
+
+
+def timestamp_utc() -> str:
+    return _dt.datetime.now(_dt.timezone.utc).replace(microsecond=0).isoformat()
+
+
+def capture_timestamp() -> str:
+    return _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%d-%H%M%S")
+
+
+def short_identifier(value: object) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", str(value or "").lower()).strip("-")
+    return slug[:24] or uuid.uuid4().hex[:8]
+
+
+def new_capture_request_id(payload: dict) -> str:
+    return f"capture-{capture_timestamp()}-{short_identifier(payload.get('session_id'))}-{uuid.uuid4().hex[:8]}"
+
+
+def write_audit(
+    payload: dict,
+    signals: dict,
+    decision: str,
+    reason_code: str,
+    capture_request_id: str | None = None,
+) -> None:
+    try:
+        entry = {
+            "timestamp": timestamp_utc(),
+            "hook_event_name": payload.get("hook_event_name"),
+            "session_id": payload.get("session_id"),
+            "turn_id": payload.get("turn_id"),
+            "cwd": str(signals["cwd"]),
+            "repo_root": signals["repo_root"],
+            "repo_name": signals["repo_name"],
+            "stop_hook_active": payload.get("stop_hook_active"),
+            "inside_git_repo": signals["inside_git_repo"],
+            "changed_files_count": signals["changed_files_count"],
+            "diff_stat_present": signals["diff_stat_present"],
+            "current_turn_keyword_hits": signals["current_turn_keyword_hits"],
+            "score": signals["score"],
+            "decision": decision,
+            "reason_code": reason_code,
+            "schema_version": AUDIT_SCHEMA_VERSION,
+        }
+        if capture_request_id:
+            entry["capture_request_id"] = capture_request_id
+        path = audit_log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        return
+
+
+def continue_with_audit(payload: dict, signals: dict, reason_code: str) -> dict:
+    write_audit(payload, signals, "continue", reason_code)
+    return continue_response()
+
+
+def block_with_audit(payload: dict, signals: dict) -> dict:
+    capture_request_id = new_capture_request_id(payload)
+    write_audit(payload, signals, "block", "threshold_met", capture_request_id)
+    return {"decision": "block", "reason": CAPTURE_REASON.format(capture_request_id=capture_request_id)}
 
 
 def decide(payload: dict) -> dict:
+    signals = decision_signals(payload)
     if payload.get("stop_hook_active") is True:
-        return continue_response()
+        return continue_with_audit(payload, signals, "stop_hook_active")
+    if signals["current_turn_keyword_hits"] == 0:
+        return continue_with_audit(payload, signals, "no_current_turn_signal")
     threshold = 3
-    if score_payload(payload) < threshold:
-        return continue_response()
-    return {"decision": "block", "reason": CAPTURE_REASON}
+    if signals["score"] < threshold:
+        return continue_with_audit(payload, signals, "below_threshold")
+    return block_with_audit(payload, signals)
 
 
 def main() -> int:

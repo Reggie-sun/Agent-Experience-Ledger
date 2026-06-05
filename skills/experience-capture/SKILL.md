@@ -20,11 +20,11 @@ Write one reusable engineering lesson as a structured Markdown candidate in the 
 
 ## Workflow
 
-1. Use the safe context from the hook: ledger root, cwd, repo, branch, changed file paths, and final outcome.
+1. Use the safe context from the hook: ledger root, cwd, repo, branch, changed file paths, capture_request_id, source_session_id, source_turn_id, and final outcome.
 2. Decide whether there is one durable lesson future agents can reuse.
 3. If not, do not write a candidate; stop normally.
 4. Confirm the lesson has concrete evidence and assign confidence: `low`, `medium`, or `high`.
-5. Draft a concise memory with the schema below.
+5. Draft a concise memory with the schema below. If the Stop instruction includes a `capture_request_id`, include it in frontmatter along with `source_session_id`, `source_turn_id`, `source_repo`, or `source_cwd` when available.
 6. Redact any sensitive value before writing. Use `python3 scripts/redact.py` when checking pasted text.
 7. Save to `inbox/YYYY-MM-DD-short-slug.md`.
 8. Run `python3 scripts/validate_memory.py <candidate-path>` from the ledger root.
@@ -55,6 +55,11 @@ tags: ["hooks", "testing"]
 confidence: "medium"
 repo: "repo-name"
 branch: "branch-name"
+capture_request_id: "capture-YYYYMMDD-HHMMSS-short-session"
+source_session_id: "session-id-if-provided"
+source_turn_id: "turn-id-if-provided"
+source_repo: "repo-name-if-provided"
+source_cwd: "cwd-if-provided"
 privacy:
   contains_raw_transcript: false
   contains_secrets: false

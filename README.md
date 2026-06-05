@@ -41,14 +41,22 @@ Install the shared skill files:
 python3 scripts/install_global.py --install-skills
 ```
 
-Print hook configuration snippets:
+Canonical hook installers:
 
 ```bash
-python3 scripts/install_codex_hooks.py
-python3 scripts/install_claude_hooks.py
+python3 scripts/install_codex_hooks.py --install
+python3 scripts/install_claude_hooks.py --install
 ```
 
-The installer does not call RAG, does not install vector stores, and does not read raw transcripts.
+To print the snippets without installing, omit `--install`.
+
+`install_codex_hooks.py` is the canonical Codex hook installer and writes `~/.codex/hooks.json` with a backup when installing.
+
+`install_claude_hooks.py` is the canonical Claude hook installer and writes `~/.claude/settings.json` with a backup when installing.
+
+`install_global.py` is only for shared skill installation and legacy snippet printing. Its hook install flags are deprecated to avoid duplicate hook registration.
+
+The installers do not call RAG, do not install vector stores, and do not read raw transcripts.
 
 ## Design Principle
 

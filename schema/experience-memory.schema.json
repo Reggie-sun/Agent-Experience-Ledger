@@ -62,6 +62,27 @@
       "type": "string",
       "maxLength": 120
     },
+    "capture_request_id": {
+      "type": "string",
+      "pattern": "^capture-[0-9]{8}-[0-9]{6}-[a-z0-9-]{1,80}$",
+      "maxLength": 120
+    },
+    "source_session_id": {
+      "type": "string",
+      "maxLength": 120
+    },
+    "source_turn_id": {
+      "type": "string",
+      "maxLength": 120
+    },
+    "source_repo": {
+      "type": "string",
+      "maxLength": 120
+    },
+    "source_cwd": {
+      "type": "string",
+      "maxLength": 500
+    },
     "privacy": {
       "type": "object",
       "required": ["contains_raw_transcript", "contains_secrets", "redaction_notes"],

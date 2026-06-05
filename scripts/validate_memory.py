@@ -23,8 +23,10 @@ def main() -> int:
     root = ledger_root()
     paths = [Path(item) for item in args.paths]
     if args.all:
+        discovered: set[Path] = set(paths)
         for name in ("inbox", "memories", "rejected"):
-            paths.extend(sorted((root / name).glob("*.md")))
+            discovered.update((root / name).glob("**/*.md"))
+        paths = sorted(discovered)
     if not paths:
         print("No memory files to validate.")
         return 0

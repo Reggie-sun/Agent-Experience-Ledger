@@ -14,6 +14,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
+try:
+    from jsonschema import Draft202012Validator, FormatChecker
+except ImportError:  # pragma: no cover - local fallback for minimal Python installs
+    Draft202012Validator = None  # type: ignore[assignment]
+    FormatChecker = None  # type: ignore[assignment]
+
 
 SCHEMA_VERSION = "1"
 MAX_CONTEXT_CHARS = 9000
@@ -81,15 +87,35 @@ SECRET_PATTERNS = [
     re.compile(r"\bgithub_pat_[A-Za-z0-9_]{40,}\b"),
     re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}\b"),
     re.compile(r"\bsk-(?:proj|svcacct)?-?[A-Za-z0-9_-]{20,}\b"),
-    re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{12,}\b"),
+    re.compile(r"(?i)\bauthorization\s*[:=]\s*['\"]?bearer\s+['\"]?[A-Za-z0-9._~+/=-]{12,}['\"]?"),
+    re.compile(r"(?i)\bbearer\s+['\"]?[A-Za-z0-9._~+/=-]{12,}['\"]?"),
+    re.compile(
+        r"(?i)\"(?:api[_-]?key|token|secret|password|passwd|pwd|credential|client[_-]?secret|"
+        r"access[_-]?key|access[_-]?token|refresh[_-]?token)\"\s*:\s*\"[^\"]{6,}\""
+    ),
     re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"),
     re.compile(r"(?i)\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|rediss)://[^\s\"'<>]+"),
-    re.compile(r"(?m)^[A-Z][A-Z0-9_]{1,80}\s*=\s*[^\n#]{4,}$"),
+    re.compile(
+        r"(?ims)^[A-Z0-9_]*(?:API[_-]?KEY|SECRET|TOKEN|PASSWORD|PASSWD|PWD|DATABASE[_-]?URL|"
+        r"AUTHORIZATION)[A-Z0-9_]*\s*=\s*(?:'''.*?'''|\"\"\".*?\"\"\"|[^\n#]{4,})"
+    ),
+    re.compile(
+        r"(?ims)^[a-z0-9_]*(?:api[_-]?key|secret|token|password|passwd|pwd|database[_-]?url|"
+        r"authorization)[a-z0-9_]*\s*=\s*(?:'''.*?'''|\"\"\".*?\"\"\"|[^\n#]{4,})"
+    ),
     re.compile(
         r"(?i)\b(api[_-]?key|token|secret|password|passwd|pwd|credential|client[_-]?secret|"
         r"access[_-]?key|access[_-]?token|refresh[_-]?token)\b"
-        r"\s*[:=]\s*['\"]?[^'\"\s]{6,}"
+        r"\s*[:=]\s*['\"]?[^'\"\s,}]{6,}['\"]?"
     ),
+]
+
+RAW_TRANSCRIPT_PATTERNS = [
+    re.compile(r"(?i)\btranscript_path\b"),
+    re.compile(r"\.jsonl\b"),
+    re.compile(r'"role"\s*:\s*"(?:user|assistant|system|tool)"'),
+    re.compile(r'"hook_event_name"\s*:'),
+    re.compile(r'"last_assistant_message"\s*:'),
 ]
 
 
@@ -110,6 +136,17 @@ def ledger_root() -> Path:
     if configured:
         return Path(configured).expanduser().resolve()
     return Path(__file__).resolve().parents[1]
+
+
+def schema_path() -> Path:
+    return ledger_root() / "schema" / "experience-memory.schema.json"
+
+
+def load_memory_schema() -> dict[str, Any]:
+    try:
+        return json.loads(schema_path().read_text(encoding="utf-8"))
+    except OSError:
+        return {}
 
 
 def now_utc() -> str:
@@ -262,6 +299,23 @@ def parse_scalar(value: str) -> Any:
         except json.JSONDecodeError:
             return [part.strip().strip('"').strip("'") for part in value[1:-1].split(",") if part.strip()]
     return value
+
+
+def parse_iso_date(value: str) -> bool:
+    try:
+        _dt.date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
+def parse_iso_datetime(value: str) -> bool:
+    normalized = value.replace("Z", "+00:00")
+    try:
+        _dt.datetime.fromisoformat(normalized)
+    except ValueError:
+        return False
+    return True
 
 
 def split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
@@ -485,10 +539,20 @@ def required_sections() -> list[str]:
     return ["Summary", "Applies When", "Evidence", "Lesson", "Avoid", "Verification"]
 
 
-def validate_memory_text(text: str, expected_statuses: Iterable[str] | None = None) -> list[str]:
+def validate_frontmatter_against_schema(frontmatter: dict[str, Any]) -> list[str]:
+    schema = load_memory_schema()
+    if Draft202012Validator is None or FormatChecker is None or not schema:
+        return validate_frontmatter_custom(frontmatter)
+    validator = Draft202012Validator(schema, format_checker=FormatChecker())
+    messages: list[str] = []
+    for error in validator.iter_errors(frontmatter):
+        path = ".".join(str(part) for part in error.absolute_path)
+        messages.append(f"{path}: {error.message}" if path else error.message)
+    return sorted(messages)
+
+
+def validate_frontmatter_custom(frontmatter: dict[str, Any]) -> list[str]:
     errors: list[str] = []
-    frontmatter, body = split_frontmatter(text)
-    expected = set(expected_statuses or {"candidate", "promoted", "rejected"})
     required_keys = [
         "schema_version",
         "title",
@@ -504,34 +568,84 @@ def validate_memory_text(text: str, expected_statuses: Iterable[str] | None = No
         if key not in frontmatter:
             errors.append(f"missing frontmatter key: {key}")
     if frontmatter.get("schema_version") != SCHEMA_VERSION:
-        errors.append("schema_version must be \"1\"")
-    if frontmatter.get("status") not in expected:
-        errors.append(f"status must be one of: {', '.join(sorted(expected))}")
-    category = str(frontmatter.get("category") or "")
-    if not re.match(r"^[a-z0-9][a-z0-9-]{1,39}$", category):
+        errors.append('schema_version must be "1"')
+    title = frontmatter.get("title")
+    if not isinstance(title, str) or not (8 <= len(title) <= 120):
+        errors.append("title must be 8-120 characters")
+    date = frontmatter.get("date")
+    if not isinstance(date, str) or not parse_iso_date(date):
+        errors.append("date must be YYYY-MM-DD")
+    if frontmatter.get("source_agent") not in {"codex", "claude", "unknown"}:
+        errors.append("source_agent must be codex, claude, or unknown")
+    if frontmatter.get("status") not in {"candidate", "promoted", "rejected"}:
+        errors.append("status must be candidate, promoted, or rejected")
+    category = frontmatter.get("category")
+    if not isinstance(category, str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,39}", category):
         errors.append("category must be a lowercase slug")
-    confidence = str(frontmatter.get("confidence") or "")
-    if confidence not in {"low", "medium", "high"}:
+    if frontmatter.get("confidence") not in {"low", "medium", "high"}:
         errors.append("confidence must be low, medium, or high")
     tags = frontmatter.get("tags")
-    if not isinstance(tags, list) or not tags:
-        errors.append("tags must be a non-empty inline list")
+    if not isinstance(tags, list) or not tags or len(tags) > 10:
+        errors.append("tags must be a non-empty inline list with at most 10 items")
+    elif any(not isinstance(tag, str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,39}", tag) for tag in tags):
+        errors.append("tags must be lowercase slugs")
     privacy = frontmatter.get("privacy")
     if not isinstance(privacy, dict):
         errors.append("privacy must be a nested map")
     else:
+        for key in ("contains_raw_transcript", "contains_secrets", "redaction_notes"):
+            if key not in privacy:
+                errors.append(f"privacy.{key} is required")
         if privacy.get("contains_raw_transcript") is not False:
             errors.append("privacy.contains_raw_transcript must be false")
         if privacy.get("contains_secrets") is not False:
             errors.append("privacy.contains_secrets must be false")
+        if not isinstance(privacy.get("redaction_notes"), str):
+            errors.append("privacy.redaction_notes must be a string")
+    reviewed_at = frontmatter.get("reviewed_at")
+    if reviewed_at is not None and (not isinstance(reviewed_at, str) or not parse_iso_datetime(reviewed_at)):
+        errors.append("reviewed_at must be an ISO date-time")
+    capture_request_id = frontmatter.get("capture_request_id")
+    if capture_request_id is not None:
+        if not isinstance(capture_request_id, str) or not re.fullmatch(
+            r"capture-[0-9]{8}-[0-9]{6}-[a-z0-9-]{1,80}",
+            capture_request_id,
+        ):
+            errors.append("capture_request_id must be a capture request id")
+    for key, limit in {
+        "source_session_id": 120,
+        "source_turn_id": 120,
+        "source_repo": 120,
+        "source_cwd": 500,
+    }.items():
+        value = frontmatter.get(key)
+        if value is not None and (not isinstance(value, str) or len(value) > limit):
+            errors.append(f"{key} must be a string of at most {limit} characters")
+    return errors
+
+
+def contains_raw_transcript_like_content(text: str) -> bool:
+    return any(pattern.search(text) for pattern in RAW_TRANSCRIPT_PATTERNS)
+
+
+def validate_memory_text(text: str, expected_statuses: Iterable[str] | None = None) -> list[str]:
+    errors: list[str] = []
+    frontmatter, body = split_frontmatter(text)
+    expected = set(expected_statuses or {"candidate", "promoted", "rejected"})
+    errors.extend(validate_frontmatter_against_schema(frontmatter))
+    if frontmatter.get("status") not in expected:
+        errors.append(f"status must be one of: {', '.join(sorted(expected))}")
     for section in required_sections():
         if not extract_section(body, section):
             errors.append(f"missing body section: ## {section}")
-    if re.search(r"(?i)\btranscript_path\b", text):
-        errors.append("memory must not include transcript_path")
+    evidence = extract_section(body, "Evidence")
+    if evidence and not re.search(r"(^|\n)\s*[-*]\s+\S|\w{8,}", evidence):
+        errors.append("Evidence section must include concrete evidence text")
+    if contains_raw_transcript_like_content(text):
+        errors.append("memory must not include raw transcript-like content")
     if contains_secret(text):
         errors.append("memory appears to contain a secret")
-    return errors
+    return sorted(set(errors))
 
 
 def update_memory_status(path: Path, status: str, extra: dict[str, str] | None = None) -> None:

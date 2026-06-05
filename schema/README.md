@@ -2,6 +2,8 @@
 
 Experience memories are Markdown files with YAML-like frontmatter and fixed body sections.
 
+`scripts/validate_memory.py` validates frontmatter against `schema/experience-memory.schema.json` when `jsonschema` is available. On minimal Python installs without `jsonschema`, it falls back to a custom validator that intentionally mirrors the schema constraints and still checks the required Markdown body sections.
+
 ## Required Frontmatter
 
 ```yaml

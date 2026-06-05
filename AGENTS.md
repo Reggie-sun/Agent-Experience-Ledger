@@ -12,6 +12,7 @@
 - Capture reusable engineering experience, not chat archives, logs, or one-off session summaries.
 
 ## Workflow
+- Do not use sub-agents in this repository unless the user explicitly asks for them.
 - `scripts/recall.py` runs on `UserPromptSubmit` and searches promoted Markdown memories with local keyword scoring.
 - `scripts/stop_trigger.py` runs on `Stop` and decides whether to ask the agent to write one candidate memory.
 - `scripts/redact.py` redacts secret-looking values before a candidate is written or promoted.
