@@ -71,17 +71,24 @@ STOPWORDS = {
 }
 
 SECRET_PATTERNS = [
-    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+    re.compile(
+        r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----",
+        re.DOTALL,
+    ),
     re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
     re.compile(r"\bASIA[0-9A-Z]{16}\b"),
-    re.compile(r"\bghp_[A-Za-z0-9_]{30,}\b"),
+    re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{20,}\b"),
     re.compile(r"\bgithub_pat_[A-Za-z0-9_]{40,}\b"),
     re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}\b"),
-    re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b"),
+    re.compile(r"\bsk-(?:proj|svcacct)?-?[A-Za-z0-9_-]{20,}\b"),
+    re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{12,}\b"),
     re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"),
+    re.compile(r"(?i)\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|rediss)://[^\s\"'<>]+"),
+    re.compile(r"(?m)^[A-Z][A-Z0-9_]{1,80}\s*=\s*[^\n#]{4,}$"),
     re.compile(
-        r"(?i)\b(api[_-]?key|token|secret|password|credential|access[_-]?key)\b"
-        r"\s*[:=]\s*['\"]?[^'\"\s]{8,}"
+        r"(?i)\b(api[_-]?key|token|secret|password|passwd|pwd|credential|client[_-]?secret|"
+        r"access[_-]?key|access[_-]?token|refresh[_-]?token)\b"
+        r"\s*[:=]\s*['\"]?[^'\"\s]{6,}"
     ),
 ]
 
@@ -301,7 +308,9 @@ def format_frontmatter(data: dict[str, Any]) -> str:
         "date",
         "source_agent",
         "status",
+        "category",
         "tags",
+        "confidence",
         "repo",
         "branch",
         "privacy",
@@ -374,8 +383,8 @@ def memory_search_text(memory: MemoryMatch) -> str:
             memory.title,
             " ".join(memory.tags),
             memory.summary,
-            memory.lesson,
             memory.applies_when,
+            memory.lesson,
             memory.verification,
         ]
     )
@@ -405,7 +414,7 @@ def find_relevant_memories(query: str, top_k: int = DEFAULT_TOP_K) -> list[Memor
     root = ledger_root()
     query_tokens = set(tokenize(query))
     matches: list[MemoryMatch] = []
-    for path in sorted((root / "memories").glob("*.md")):
+    for path in sorted((root / "memories").glob("**/*.md")):
         memory = load_memory(path)
         if memory is None:
             continue
@@ -438,22 +447,17 @@ def format_memory_context(matches: list[MemoryMatch]) -> str:
     if not matches:
         return ""
     root = ledger_root()
-    blocks = [
-        "Agent Experience Ledger relevant promoted memories "
-        "(local keyword search only; no RAG, embeddings, Qdrant, or Redis):"
-    ]
+    blocks = ["Relevant prior experience:"]
     for index, memory in enumerate(matches, start=1):
         relpath = memory.path.relative_to(root)
         tags = ", ".join(memory.tags) if memory.tags else "untagged"
         blocks.append(
             "\n".join(
                 [
-                    f"{index}. {memory.title}",
-                    f"   Path: {relpath}",
+                    f"{index}. {memory.title} ({relpath})",
                     f"   Tags: {tags}",
-                    f"   Summary: {compact_text(memory.summary, 360)}",
-                    f"   Lesson: {compact_text(memory.lesson, 500)}",
-                    f"   Verification: {compact_text(memory.verification, 320)}",
+                    f"   Lesson: {compact_text(memory.lesson, 320)}",
+                    f"   Evidence: {compact_text(memory.verification, 220)}",
                 ]
             )
         )
@@ -478,14 +482,24 @@ def slugify(title: str) -> str:
 
 
 def required_sections() -> list[str]:
-    return ["Summary", "Applies When", "Lesson", "Avoid", "Verification"]
+    return ["Summary", "Applies When", "Evidence", "Lesson", "Avoid", "Verification"]
 
 
 def validate_memory_text(text: str, expected_statuses: Iterable[str] | None = None) -> list[str]:
     errors: list[str] = []
     frontmatter, body = split_frontmatter(text)
     expected = set(expected_statuses or {"candidate", "promoted", "rejected"})
-    required_keys = ["schema_version", "title", "date", "source_agent", "status", "tags", "privacy"]
+    required_keys = [
+        "schema_version",
+        "title",
+        "date",
+        "source_agent",
+        "status",
+        "category",
+        "tags",
+        "confidence",
+        "privacy",
+    ]
     for key in required_keys:
         if key not in frontmatter:
             errors.append(f"missing frontmatter key: {key}")
@@ -493,6 +507,12 @@ def validate_memory_text(text: str, expected_statuses: Iterable[str] | None = No
         errors.append("schema_version must be \"1\"")
     if frontmatter.get("status") not in expected:
         errors.append(f"status must be one of: {', '.join(sorted(expected))}")
+    category = str(frontmatter.get("category") or "")
+    if not re.match(r"^[a-z0-9][a-z0-9-]{1,39}$", category):
+        errors.append("category must be a lowercase slug")
+    confidence = str(frontmatter.get("confidence") or "")
+    if confidence not in {"low", "medium", "high"}:
+        errors.append("confidence must be low, medium, or high")
     tags = frontmatter.get("tags")
     if not isinstance(tags, list) or not tags:
         errors.append("tags must be a non-empty inline list")

@@ -11,7 +11,9 @@ title: "Short reusable engineering lesson"
 date: "2026-06-05"
 source_agent: "codex"
 status: "candidate"
+category: "hooks"
 tags: ["testing", "hooks"]
+confidence: "medium"
 repo: "example-repo"
 branch: "feature/example"
 privacy:
@@ -31,6 +33,10 @@ One concise paragraph describing the reusable lesson.
 ## Applies When
 
 - Concrete trigger or situation.
+
+## Evidence
+
+- Concrete code, test, debugging, or review evidence behind the lesson.
 
 ## Lesson
 

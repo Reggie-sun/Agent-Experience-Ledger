@@ -29,7 +29,7 @@ def hook_json() -> dict:
                     "hooks": [
                         {
                             "type": "command",
-                            "command": hook_command("recall_hook.py"),
+                            "command": hook_command("recall.py"),
                             "timeout": 10,
                         }
                     ]
@@ -40,7 +40,7 @@ def hook_json() -> dict:
                     "hooks": [
                         {
                             "type": "command",
-                            "command": hook_command("stop_hook.py"),
+                            "command": hook_command("stop_trigger.py"),
                             "timeout": 10,
                         }
                     ]
@@ -51,8 +51,8 @@ def hook_json() -> dict:
 
 
 def codex_toml_snippet() -> str:
-    recall = hook_command("recall_hook.py").replace("\\", "\\\\").replace('"', '\\"')
-    stop = hook_command("stop_hook.py").replace("\\", "\\\\").replace('"', '\\"')
+    recall = hook_command("recall.py").replace("\\", "\\\\").replace('"', '\\"')
+    stop = hook_command("stop_trigger.py").replace("\\", "\\\\").replace('"', '\\"')
     return f"""{BEGIN_MARKER}
 # Keep existing hooks and add these groups under top-level [hooks].
 

@@ -12,7 +12,8 @@
 - Capture reusable engineering experience, not chat archives, logs, or one-off session summaries.
 
 ## Workflow
-- `scripts/recall_hook.py` runs on `UserPromptSubmit` and searches promoted Markdown memories with local keyword scoring.
-- `scripts/stop_hook.py` runs on `Stop` and decides whether to ask the agent to write one candidate memory.
+- `scripts/recall.py` runs on `UserPromptSubmit` and searches promoted Markdown memories with local keyword scoring.
+- `scripts/stop_trigger.py` runs on `Stop` and decides whether to ask the agent to write one candidate memory.
+- `scripts/redact.py` redacts secret-looking values before a candidate is written or promoted.
 - `skills/experience-capture/SKILL.md` is the shared skill that tells Codex or Claude how to write a safe candidate.
-- Review candidates through a branch and PR. Promote with `scripts/promote_memory.py`; reject with `scripts/reject_memory.py`.
+- Review candidates through a branch and PR. Promote with `scripts/promote.py`; reject with `scripts/reject_memory.py`.

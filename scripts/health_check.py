@@ -35,18 +35,20 @@ def main() -> int:
     root = ledger_root()
     checks: list[tuple[str, bool, str]] = []
     for relative in [
-        "scripts/recall_hook.py",
-        "scripts/stop_hook.py",
+        "scripts/recall.py",
+        "scripts/stop_trigger.py",
+        "scripts/redact.py",
+        "scripts/promote.py",
         "skills/experience-capture/SKILL.md",
         "schema/experience-memory.schema.json",
     ]:
         path = root / relative
         checks.append((relative, path.exists(), "exists" if path.exists() else "missing"))
 
-    ok, detail = run_hook("recall_hook.py", {"prompt": "health check", "cwd": str(root)})
-    checks.append(("recall_hook.py sample", ok, detail))
+    ok, detail = run_hook("recall.py", {"prompt": "health check", "cwd": str(root)})
+    checks.append(("recall.py sample", ok, detail))
     ok, detail = run_hook(
-        "stop_hook.py",
+        "stop_trigger.py",
         {
             "hook_event_name": "Stop",
             "stop_hook_active": True,
@@ -54,7 +56,7 @@ def main() -> int:
             "last_assistant_message": "health check",
         },
     )
-    checks.append(("stop_hook.py active-loop sample", ok, detail))
+    checks.append(("stop_trigger.py active-loop sample", ok, detail))
 
     global_skill_targets = [
         Path.home() / ".agents" / "skills" / "experience-capture" / "SKILL.md",

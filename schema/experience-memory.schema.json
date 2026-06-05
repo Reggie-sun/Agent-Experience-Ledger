@@ -9,7 +9,9 @@
     "date",
     "source_agent",
     "status",
+    "category",
     "tags",
+    "confidence",
     "privacy"
   ],
   "additionalProperties": false,
@@ -35,6 +37,10 @@
       "type": "string",
       "enum": ["candidate", "promoted", "rejected"]
     },
+    "category": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{1,39}$"
+    },
     "tags": {
       "type": "array",
       "minItems": 1,
@@ -43,6 +49,10 @@
         "type": "string",
         "pattern": "^[a-z0-9][a-z0-9-]{1,39}$"
       }
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["low", "medium", "high"]
     },
     "repo": {
       "type": "string",

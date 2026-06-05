@@ -44,7 +44,8 @@ python3 scripts/install_global.py --install-skills
 Print hook configuration snippets:
 
 ```bash
-python3 scripts/install_global.py --print-hook-snippets
+python3 scripts/install_codex_hooks.py
+python3 scripts/install_claude_hooks.py
 ```
 
 The installer does not call RAG, does not install vector stores, and does not read raw transcripts.
@@ -60,8 +61,8 @@ The agent owns judgment work: deciding the reusable lesson and writing the candi
 Use these commands from global hook configuration:
 
 ```bash
-python3 /absolute/path/to/agent-experience-ledger/scripts/recall_hook.py
-python3 /absolute/path/to/agent-experience-ledger/scripts/stop_hook.py
+python3 /absolute/path/to/agent-experience-ledger/scripts/recall.py
+python3 /absolute/path/to/agent-experience-ledger/scripts/stop_trigger.py
 ```
 
 Set `AGENT_EXPERIENCE_LEDGER_ROOT` if the scripts are invoked from another location:
@@ -75,7 +76,7 @@ export AGENT_EXPERIENCE_LEDGER_ROOT=/absolute/path/to/agent-experience-ledger
 Candidate files go to `inbox/` only. Human reviewers promote a candidate after checking privacy, usefulness, and schema compliance:
 
 ```bash
-python3 scripts/promote_memory.py inbox/2026-06-05-example.md
+python3 scripts/promote.py inbox/2026-06-05-example.md
 ```
 
 Reject unsafe or low-value candidates:
