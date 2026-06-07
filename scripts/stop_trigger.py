@@ -5,12 +5,13 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import os
 import re
 import sys
 import uuid
 from pathlib import Path
 
-from ledger_common import changed_files, continue_response, cwd_from_payload, diff_stat, run_git
+from ledger_common import changed_files, continue_response, cwd_from_payload, diff_stat, ledger_root, run_git
 
 
 AUDIT_SCHEMA_VERSION = "1"
@@ -108,6 +109,7 @@ def decision_signals(payload: dict) -> dict:
         "repo_root": root,
         "repo_name": Path(root).name if root else "",
         "inside_git_repo": inside,
+        "changed_files": files,
         "changed_files_count": len(files),
         "diff_stat_present": bool(stat),
         "current_turn_keyword_hits": hits,
@@ -125,6 +127,69 @@ def audit_log_path() -> Path:
 
 def timestamp_utc() -> str:
     return _dt.datetime.now(_dt.timezone.utc).replace(microsecond=0).isoformat()
+
+
+def parse_timestamp(value: object) -> _dt.datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = _dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=_dt.timezone.utc)
+    return parsed
+
+
+def cooldown_seconds() -> int:
+    raw = os.environ.get("AGENT_EXPERIENCE_LEDGER_STOP_COOLDOWN_SECONDS", "600")
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 600
+
+
+def recent_session_block(payload: dict) -> bool:
+    session_id = payload.get("session_id")
+    if not session_id:
+        return False
+    window = cooldown_seconds()
+    if window <= 0:
+        return False
+    path = audit_log_path()
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+    cutoff = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(seconds=window)
+    for line in reversed(lines[-200:]):
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if entry.get("session_id") != session_id or entry.get("decision") != "block":
+            continue
+        timestamp = parse_timestamp(entry.get("timestamp"))
+        if timestamp and timestamp >= cutoff:
+            return True
+    return False
+
+
+def is_housekeeping_path(path: str) -> bool:
+    normalized = path.strip().lstrip("./")
+    return normalized == "dogfood-log.md" or normalized.startswith("inbox/")
+
+
+def is_self_dogfood_housekeeping(signals: dict) -> bool:
+    if not signals["repo_root"]:
+        return False
+    try:
+        if Path(signals["repo_root"]).resolve() != ledger_root():
+            return False
+    except OSError:
+        return False
+    files = signals.get("changed_files") or []
+    return bool(files) and all(is_housekeeping_path(path) for path in files)
 
 
 def capture_timestamp() -> str:
@@ -191,6 +256,10 @@ def decide(payload: dict) -> dict:
     signals = decision_signals(payload)
     if payload.get("stop_hook_active") is True:
         return continue_with_audit(payload, signals, "stop_hook_active")
+    if is_self_dogfood_housekeeping(signals):
+        return continue_with_audit(payload, signals, "self_dogfood_housekeeping")
+    if recent_session_block(payload):
+        return continue_with_audit(payload, signals, "session_cooldown")
     if signals["current_turn_keyword_hits"] == 0:
         return continue_with_audit(payload, signals, "no_current_turn_signal")
     threshold = 3

@@ -80,12 +80,15 @@ Task type:
 - RAG-memory-agent work
 
 Should Stop capture trigger: Yes. This task added safe Stop decision observability and candidate attribution, with tests and manual smoke evidence.
-Actual Stop capture triggered: Pending. Stop hook will run after this response, so the real outcome needs a follow-up check.
+Actual Stop capture triggered: No. The audit log has no Task 5 `Agent_Experience_Ledger` block entry after this task; the only local repo entries are `continue` with `reason_code: stop_hook_active` from validation samples.
+Audit decision: continue / no Task 5 block entry. Latest relevant local entries: `decision: continue`, `reason_code: stop_hook_active`, `score: 5`, `current_turn_keyword_hits: 0`, no `capture_request_id`.
+capture_request_id: None for Task 5. An unrelated `csgojiaoben` Stop block produced `capture-20260605-085024-019e96b2-2d29-7f93-bc7b--2ed8c3c4`.
 Recall injected context: None observed.
 Recall useful: Not applicable.
-Candidate created: Pending.
-Candidate quality: Pending.
+Candidate created: No Task 5 candidate. Current inbox includes unrelated candidates from `csgojiaoben` and `Enterprise-grade_RAG`.
+Candidate matched capture_request_id: No Task 5 capture id exists. One unrelated candidate, `2026-06-05-guard-live-cookie-capture-before-saving.md`, correctly matches the unrelated `csgojiaoben` capture id.
+Candidate quality: Not applicable for Task 5. The unrelated attributed `csgojiaoben` candidate is schema-valid, safe, and good quality, but not about Task 5.
 Promoted: No.
 Rejected: No.
-Sensitive info risk: Low. The audit log records metadata only and tests verify raw assistant message text is not written.
-Notes: Added `~/.agent-experience-ledger/stop-trigger-decisions.jsonl` audit logging, `capture_request_id` in block reasons, optional candidate attribution frontmatter fields, and experience-capture skill instructions. Manual smoke confirmed meaningful Stop blocks with matching audit `capture_request_id`, while dirty repo plus `Done.` continues without a capture id.
+Sensitive info risk: Low. Candidate inspection found schema-valid files with no secret or raw-transcript-like pattern matches.
+Notes: Added `~/.agent-experience-ledger/stop-trigger-decisions.jsonl` audit logging, `capture_request_id` in block reasons, optional candidate attribution frontmatter fields, and experience-capture skill instructions. Manual smoke confirmed meaningful Stop blocks with matching audit `capture_request_id`, while dirty repo plus `Done.` continues without a capture id. Real end-to-end attribution was proven by an unrelated `csgojiaoben` block and matching candidate, but Task 5 itself did not produce a block or candidate.

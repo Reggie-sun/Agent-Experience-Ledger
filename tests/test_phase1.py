@@ -213,6 +213,65 @@ class Phase1Tests(unittest.TestCase):
 
             self.assertEqual(parse_stdout(completed), {"continue": True})
 
+    def test_stop_trigger_suppresses_self_dogfood_housekeeping_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "ledger"
+            home = Path(tmp) / "home"
+            inbox = root / "inbox"
+            inbox.mkdir(parents=True)
+            home.mkdir()
+            subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True)
+            (inbox / "candidate.md").write_text(memory_text(), encoding="utf-8")
+            (root / "dogfood-log.md").write_text("dogfood note\n", encoding="utf-8")
+
+            completed = run_script(
+                "stop_trigger.py",
+                {
+                    "hook_event_name": "Stop",
+                    "cwd": str(root),
+                    "session_id": "self-dogfood-session",
+                    "stop_hook_active": False,
+                    "last_assistant_message": "Analyzed hook memory agent tests and capture behavior.",
+                },
+                {"HOME": str(home), "AGENT_EXPERIENCE_LEDGER_ROOT": str(root)},
+            )
+
+            self.assertEqual(parse_stdout(completed), {"continue": True})
+            entry = read_jsonl(home / ".agent-experience-ledger" / "stop-trigger-decisions.jsonl")[0]
+            self.assertEqual(entry["decision"], "continue")
+            self.assertEqual(entry["reason_code"], "self_dogfood_housekeeping")
+
+    def test_stop_trigger_cooldown_continues_after_recent_block_in_same_session(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "repo"
+            home = Path(tmp) / "home"
+            root.mkdir()
+            home.mkdir()
+            subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True)
+            (root / "changed.py").write_text("print('first change')\n", encoding="utf-8")
+            payload = {
+                "hook_event_name": "Stop",
+                "cwd": str(root),
+                "session_id": "cooldown-session",
+                "stop_hook_active": False,
+                "last_assistant_message": "Fixed a bug after adding tests and documenting the decision.",
+            }
+            env = {"HOME": str(home), "AGENT_EXPERIENCE_LEDGER_ROOT": str(ROOT)}
+
+            first = run_script("stop_trigger.py", payload, env)
+            self.assertEqual(parse_stdout(first)["decision"], "block")
+
+            second = run_script(
+                "stop_trigger.py",
+                {**payload, "turn_id": "next-turn", "last_assistant_message": "Fixed another test and memory issue."},
+                env,
+            )
+
+            self.assertEqual(parse_stdout(second), {"continue": True})
+            entries = read_jsonl(home / ".agent-experience-ledger" / "stop-trigger-decisions.jsonl")
+            self.assertEqual(entries[-1]["decision"], "continue")
+            self.assertEqual(entries[-1]["reason_code"], "session_cooldown")
+
     def test_stop_trigger_audit_logs_block_with_capture_request_id_and_no_raw_message(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp) / "home"
@@ -291,6 +350,41 @@ class Phase1Tests(unittest.TestCase):
             self.assertEqual(entry["reason_code"], "no_current_turn_signal")
             self.assertEqual(entry["current_turn_keyword_hits"], 0)
             self.assertNotIn("capture_request_id", entry)
+
+    def test_recall_writes_safe_audit_without_raw_prompt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "ledger"
+            home = Path(tmp) / "home"
+            memory_dir = root / "memories" / "hooks"
+            memory_dir.mkdir(parents=True)
+            home.mkdir()
+            (memory_dir / "hook-loop.md").write_text(memory_text("promoted"), encoding="utf-8")
+            raw_prompt = "SENTINEL_RAW_PROMPT build a Stop hook loop memory"
+
+            completed = run_script(
+                "recall.py",
+                {
+                    "hook_event_name": "UserPromptSubmit",
+                    "cwd": str(root),
+                    "session_id": "recall-audit-session",
+                    "prompt": raw_prompt,
+                },
+                {"HOME": str(home), "AGENT_EXPERIENCE_LEDGER_ROOT": str(root)},
+            )
+
+            self.assertTrue(parse_stdout(completed)["continue"])
+            audit_path = home / ".agent-experience-ledger" / "recall-decisions.jsonl"
+            self.assertTrue(audit_path.exists())
+            raw_audit = audit_path.read_text(encoding="utf-8")
+            self.assertNotIn(raw_prompt, raw_audit)
+            entry = read_jsonl(audit_path)[0]
+            self.assertEqual(entry["hook_event_name"], "UserPromptSubmit")
+            self.assertEqual(entry["session_id"], "recall-audit-session")
+            self.assertEqual(entry["cwd"], str(root.resolve()))
+            self.assertTrue(entry["prompt_present"])
+            self.assertGreaterEqual(entry["match_count"], 1)
+            self.assertTrue(entry["injected_context"])
+            self.assertEqual(entry["schema_version"], "1")
 
     def test_stop_trigger_audit_log_failure_fails_open(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

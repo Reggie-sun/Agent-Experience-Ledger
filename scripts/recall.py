@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from pathlib import Path
 
 from ledger_common import (
     branch_name,
@@ -13,6 +14,7 @@ from ledger_common import (
     cwd_from_payload,
     find_relevant_memories,
     format_memory_context,
+    now_utc,
     prompt_from_payload,
     repo_name,
 )
@@ -48,9 +50,38 @@ def build_query(payload: dict) -> str:
     return " ".join(part for part in fields if part)
 
 
+def audit_log_path() -> Path:
+    return Path.home() / ".agent-experience-ledger" / "recall-decisions.jsonl"
+
+
+def write_audit(payload: dict, matches: list) -> None:
+    try:
+        cwd = cwd_from_payload(payload)
+        entry = {
+            "timestamp": now_utc(),
+            "hook_event_name": payload.get("hook_event_name"),
+            "session_id": payload.get("session_id"),
+            "cwd": str(cwd),
+            "repo_name": repo_name(cwd),
+            "branch": branch_name(cwd),
+            "prompt_present": bool(prompt_from_payload(payload).strip()),
+            "match_count": len(matches),
+            "top_score": matches[0].score if matches else 0,
+            "injected_context": bool(matches),
+            "schema_version": "1",
+        }
+        path = audit_log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        return
+
+
 def recall(payload: dict) -> dict:
     top_k = min(int(os.environ.get("AGENT_EXPERIENCE_LEDGER_TOP_K", "5")), 5)
     matches = find_relevant_memories(build_query(payload), top_k=top_k)
+    write_audit(payload, matches)
     context = format_memory_context(matches)
     if not context:
         return continue_response()
